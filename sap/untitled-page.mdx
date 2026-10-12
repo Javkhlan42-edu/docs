@@ -1,0 +1,68 @@
+---
+title: "ABAP"
+description: "Factory, ZCL_API_PO_SERVICE, ZAPI_SETUP"
+---
+
+## Бүтэц
+
+| Объект | Үүрэг |
+| --- | --- |
+| `ZCL_API_FACTORY=>GET_SERVICE` | `TRANSPORT_MODE = PO` → `ZCL_API_PO_SERVICE`, бусад → `ZCL_API_SERVICE` |
+| `ZCL_API_PO_SERVICE` | `ZCL_API_SERVICE`-ээс **удамшиж** public методуудыг redefine хийнэ |
+| `ZAPI_SETUP` | `TRANSPORT_MODE` (`r_dir` / `r_po`) |
+
+```abap
+METHOD get_service.
+  DATA(lv_mode) = zcl_api_client=>get_config( iv_key = 'TRANSPORT_MODE' iv_default = 'DIRECT' ).
+  IF lv_mode = 'PO'.
+    ro_service = NEW zcl_api_po_service( ).
+  ELSE.
+    ro_service = NEW zcl_api_service( ).
+  ENDIF.
+ENDMETHOD.
+```
+
+## `ZCL_API_PO_SERVICE`
+
+| Метод | PO горимд |
+| --- | --- |
+| `list_collections` | Collections proxy → `ZAPI_COLL` |
+| `load_objects` | `limit/offset`-оор хуудаслана → `ZAPI_OBJECTS`. ID жагсаалтад Object proxy-г нэг нэгээр |
+| `get_object` | Object proxy |
+| `create_object` | `iv_data`-аас `price`, `color`, `capacity` → ObjectCreate proxy |
+| `replace / patch / delete` | `not_supported` → `ZAPI_LOG`-д E |
+| `call_*` | Proxy дуудаж `CX_AI_*`-г `ZCX_API_ERROR` болгоно |
+| `save_item` | `ZAPIDT_ZAPI_OBJECT` → `ZAPI_OBJECTS` (`RAW_JSON = DATA_JSON`) |
+
+```abap
+METHOD call_objects.
+  DATA ls_req TYPE zapimt_zapi_objects_req.
+  ls_req-mt_zapi_objects_req-collection = iv_collection.
+  ls_req-mt_zapi_objects_req-limit      = iv_limit.
+  ls_req-mt_zapi_objects_req-offset     = iv_offset.
+  TRY.
+      NEW zapico_si_sap2restapi_objects( logical_port_name = c_lp_objects
+        )->si_sap2restapi_objects_out( EXPORTING output = ls_req
+                                       IMPORTING input  = rs_resp ).
+    CATCH cx_ai_system_fault cx_ai_application_fault INTO DATA(lx).
+      DATA(lx_api) = ai_error( lx ).
+      RAISE EXCEPTION lx_api.
+  ENDTRY.
+ENDMETHOD.
+```
+
+```abap
+" create_object: object wrapper-тэй бүтэц
+ls_req-mt_zapi_object_create_req-object-collection     = iv_collection.
+ls_req-mt_zapi_object_create_req-object-name           = iv_name.
+ls_req-mt_zapi_object_create_req-object-data-price     = lv_v.
+```
+
+## Юуг систем үүсгэдэг, юуг гараар бичдэг
+
+| Хэсэг | Хэн |
+| --- | --- |
+| Proxy класс, `ZAPIMT_` / `ZAPIDT_` бүтэц | SPROXY |
+| Удамшил, redefinition-ийн хүрээ | SE24: Superclass + **Redefine** |
+| Proxy дуудлага | SE24: **Pattern → Call Method** |
+| Бизнесийн логик | Гараар |
